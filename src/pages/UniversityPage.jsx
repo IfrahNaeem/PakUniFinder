@@ -3,14 +3,21 @@ import {
   ArrowLeft, MapPin, Globe, BookOpen, DollarSign,
   Home, Phone, Calendar, CheckCircle2, AlertCircle,
 } from 'lucide-react'
-import { UNIVERSITIES, CAMPUSES, PROGRAMS, ADMISSION_CYCLES, MERIT_FORMULA, HOSTEL_INFO } from '../data/universities.js'
+import {
+  ALL_UNIVERSITIES, ALL_CAMPUSES, ALL_PROGRAMS,
+  ALL_CYCLES, ALL_MERIT, ALL_HOSTELS,
+} from '../data/universities.js'
+import { getSafeUrl } from '../utils/getSafeUrl.js'
 
 export default function UniversityPage() {
   const { id }    = useParams()
   const { state } = useLocation()
   const navigate  = useNavigate()
 
-  const uni = UNIVERSITIES.find((u) => u.university_id === id)
+  const uni =
+    ALL_UNIVERSITIES.find((u) => u.university_id === id) ||
+    state?.university ||
+    state?.match?.university
 
   if (!uni) {
     return (
@@ -24,9 +31,10 @@ export default function UniversityPage() {
     )
   }
 
-  const campuses = CAMPUSES.filter((c) => c.university_id === id)
-  const programs = PROGRAMS.filter((p) => campuses.some((c) => c.campus_id === p.campus_id))
-  const hostels  = HOSTEL_INFO.filter((h) => campuses.some((c) => c.campus_id === h.campus_id))
+  const campuses = ALL_CAMPUSES.filter((c) => c.university_id === id)
+  const programs = ALL_PROGRAMS.filter((p) => campuses.some((c) => c.campus_id === p.campus_id))
+  const hostels  = ALL_HOSTELS.filter((h) => campuses.some((c) => c.campus_id === h.campus_id))
+  const isMegaOnly = id?.startsWith('M') && programs.length === 0
 
   // If we arrived from results, we may have a specific match to highlight
   const match = state?.match ?? null
@@ -61,9 +69,10 @@ export default function UniversityPage() {
         </div>
         {uni.website && (
           <a
-            href={uni.website}
+            href={getSafeUrl(uni.website)}
             target="_blank"
             rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
             className="flex-shrink-0 flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg"
             style={{ background: '#EFF6FF', color: '#1E293B' }}
           >
@@ -103,7 +112,44 @@ export default function UniversityPage() {
           </div>
         )}
 
-        {/* Overview card */}
+        {isMegaOnly ? (
+          <div
+            className="bg-white rounded-2xl p-5 border flex flex-col gap-4"
+            style={{ borderColor: '#E2E8F0' }}
+          >
+            <div className="flex flex-wrap gap-2">
+              {(uni.field_categories ?? []).map((f) => (
+                <span
+                  key={f}
+                  className="text-[11px] font-bold px-2 py-0.5 rounded-full"
+                  style={{ background: '#EFF6FF', color: '#1E293B' }}
+                >
+                  {f}
+                </span>
+              ))}
+            </div>
+            <p className="text-xs font-bold px-3 py-1.5 rounded-full w-fit" style={{ background: uni.has_hostel ? '#EFF6FF' : '#F1F5F9', color: uni.has_hostel ? '#1D4ED8' : '#718096' }}>
+              Hostel: {uni.has_hostel ? 'Yes' : 'No'}
+            </p>
+            <div className="rounded-xl p-4 text-sm leading-relaxed" style={{ background: '#FFFBEB', color: '#92400E' }}>
+              Detailed admission data for this university is not yet in our database.
+              Please visit the official website for programs, fees, entry test and merit information.
+            </div>
+            {uni.website && (
+              <a
+                href={getSafeUrl(uni.website)}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm text-white"
+                style={{ background: '#1E293B' }}
+              >
+                Visit Official Website →
+              </a>
+            )}
+          </div>
+        ) : (
+        <>
         <div className="bg-white rounded-2xl p-5 border flex flex-col gap-4" style={{ borderColor: '#E2E8F0' }}>
           <div className="flex items-start gap-3">
             <div
@@ -145,9 +191,9 @@ export default function UniversityPage() {
           <div className="bg-white rounded-2xl p-5 border flex flex-col gap-3" style={{ borderColor: '#E2E8F0' }}>
             <h2 className="font-bold text-base" style={{ color: '#1A202C' }}>Programs Offered</h2>
             {programs.map((prog) => {
-              const formula = MERIT_FORMULA.find((f) => f.program_id === prog.program_id)
-              const cycle   = ADMISSION_CYCLES.find((c) => c.program_id === prog.program_id)
-              const campus  = CAMPUSES.find((c) => c.campus_id === prog.campus_id)
+              const formula = ALL_MERIT.find((f) => f.program_id === prog.program_id)
+              const cycle   = ALL_CYCLES.find((c) => c.program_id === prog.program_id)
+              const campus  = ALL_CAMPUSES.find((c) => c.campus_id === prog.campus_id)
 
               return (
                 <div key={prog.program_id} className="rounded-xl border p-4 flex flex-col gap-2" style={{ borderColor: '#E2E8F0' }}>
@@ -216,6 +262,8 @@ export default function UniversityPage() {
         <p className="text-[11px] text-center pb-6" style={{ color: '#A0AEC0' }}>
           Data sourced from HEC and university websites. Always verify directly before applying.
         </p>
+        </>
+        )}
       </div>
     </div>
   )

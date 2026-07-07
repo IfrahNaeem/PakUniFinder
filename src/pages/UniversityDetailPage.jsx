@@ -8,9 +8,10 @@ import {
   Info, Clock,
 } from 'lucide-react'
 import {
-  UNIVERSITIES, CAMPUSES, PROGRAMS,
-  ADMISSION_CYCLES, MERIT_FORMULA, HOSTEL_INFO,
+  ALL_UNIVERSITIES, ALL_CAMPUSES, ALL_PROGRAMS,
+  ALL_CYCLES, ALL_MERIT, ALL_HOSTELS,
 } from '../data/universities.js'
+import { getSafeUrl } from '../utils/getSafeUrl.js'
 
 // ─── Inline styles ────────────────────────────────────────
 const STYLE = `
@@ -79,7 +80,7 @@ function ProgramsTab({ programs, campuses }) {
       {programs.map((prog) => {
         const campus = campuses.find((c) => c.campus_id === prog.campus_id)
         const ft = FIELD_COLORS[prog.field_category] ?? { bg:'#F1F5F9', color:'#4A5568' }
-        const formula = MERIT_FORMULA.find((f) => f.program_id === prog.program_id)
+        const formula = ALL_MERIT.find((f) => f.program_id === prog.program_id)
 
         return (
           <div
@@ -166,7 +167,7 @@ function AdmissionTab({ programs }) {
       </div>
 
       {programs.map((prog) => {
-        const cycle = ADMISSION_CYCLES.find((c) => c.program_id === prog.program_id)
+        const cycle = ALL_CYCLES.find((c) => c.program_id === prog.program_id)
         const reminded = !!reminders[prog.program_id]
 
         function handleReminder() {
@@ -267,7 +268,7 @@ function FeesAndMeritTab({ programs, studentProfile }) {
   return (
     <div className="flex flex-col gap-4">
       {programs.map((prog) => {
-        const formula = MERIT_FORMULA.find((f) => f.program_id === prog.program_id)
+        const formula = ALL_MERIT.find((f) => f.program_id === prog.program_id)
         const semFee  = prog.semester_fee_pkr_approx ?? 0
         const sems    = prog.duration_years === '4-5' ? 10 : (Number(prog.duration_years) || 4) * 2
 
@@ -454,7 +455,7 @@ function FeeRow({ label, value, bold, highlight }) {
 
 // ─── TAB 4 — Hostel & Life ────────────────────────────────
 function HostelTab({ campuses, uniName }) {
-  const hostels = HOSTEL_INFO.filter((h) => campuses.some((c) => c.campus_id === h.campus_id))
+  const hostels = ALL_HOSTELS.filter((h) => campuses.some((c) => c.campus_id === h.campus_id))
 
   return (
     <div className="flex flex-col gap-4">
@@ -569,6 +570,69 @@ function HostelRow({ label, value, highlight, positive }) {
   )
 }
 
+// ─── Mega university layout (no detailed program data) ──────
+
+function MegaUniversityView({ uni }) {
+  const fields = uni.field_categories ?? []
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap gap-2">
+        {fields.map((f) => {
+          const ft = FIELD_COLORS[f] ?? { bg:'#F1F5F9', color:'#4A5568' }
+          return (
+            <span
+              key={f}
+              className="text-[11px] font-bold px-2.5 py-1 rounded-full"
+              style={{ background: ft.bg, color: ft.color }}
+            >
+              {f}
+            </span>
+          )
+        })}
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <span
+          className="text-xs font-bold px-3 py-1.5 rounded-full"
+          style={{
+            background: uni.has_hostel ? '#EFF6FF' : '#F1F5F9',
+            color: uni.has_hostel ? '#1D4ED8' : '#718096',
+          }}
+        >
+          <Home size={12} className="inline mr-1" style={{ verticalAlign:'-2px' }} />
+          Hostel: {uni.has_hostel ? 'Yes' : 'No'}
+        </span>
+      </div>
+
+      <div
+        className="rounded-2xl border p-5 flex flex-col gap-4"
+        style={{ borderColor:'#FEF3C7', background:'#FFFBEB' }}
+      >
+        <div className="flex items-start gap-2">
+          <Info size={18} className="flex-shrink-0 mt-0.5" style={{ color:'#B7770D' }} />
+          <p className="text-sm leading-relaxed" style={{ color:'#92400E' }}>
+            Detailed admission data for this university is not yet in our database.
+            Please visit the official website for programs, fees, entry test and merit information.
+          </p>
+        </div>
+        {uni.website && (
+          <a
+            href={getSafeUrl(uni.website)}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="flex items-center justify-center gap-2 w-full py-3.5 rounded-xl font-bold text-sm text-white transition-transform hover:scale-[1.02] active:scale-[0.98]"
+            style={{ background:'#1E293B' }}
+          >
+            Visit Official Website <ExternalLink size={16} />
+          </a>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── Main Page ────────────────────────────────────────────
 
 export default function UniversityDetailPage() {
@@ -589,7 +653,11 @@ export default function UniversityDetailPage() {
     return () => window.removeEventListener('storage', sync)
   }, [])
 
-  const uni = UNIVERSITIES.find((u) => u.university_id === id)
+  const uni =
+    ALL_UNIVERSITIES.find((u) => u.university_id === id) ||
+    state?.university ||
+    state?.match?.university
+
   if (!uni) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-4 px-6 text-center"
@@ -603,8 +671,9 @@ export default function UniversityDetailPage() {
     )
   }
 
-  const campuses = CAMPUSES.filter((c) => c.university_id === id)
-  const programs = PROGRAMS.filter((p) => campuses.some((c) => c.campus_id === p.campus_id))
+  const campuses = ALL_CAMPUSES.filter((c) => c.university_id === id)
+  const programs = ALL_PROGRAMS.filter((p) => campuses.some((c) => c.campus_id === p.campus_id))
+  const isMegaOnly = id?.startsWith('M') && programs.length === 0
 
   // Student profile for merit estimate (from navigation state or localStorage)
   const studentProfile = useMemo(() => {
@@ -724,19 +793,21 @@ export default function UniversityDetailPage() {
           {/* Website button */}
           {uni.website && (
             <a
-              href={uni.website}
+              href={getSafeUrl(uni.website)}
               target="_blank"
               rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
               className="mt-4 flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-sm font-bold transition-transform hover:scale-[1.02]"
               style={{ background:'rgba(255,255,255,0.15)', color:'#ffffff', backdropFilter:'blur(8px)' }}
             >
-              <Globe size={15} /> {uni.website.replace(/https?:\/\//, '')}
+              <Globe size={15} /> Visit Official Website
               <ExternalLink size={13} />
             </a>
           )}
         </div>
 
-        {/* ── STICKY TAB BAR ────────────────────────── */}
+        {/* ── STICKY TAB BAR (detailed only) ────────── */}
+        {!isMegaOnly && (
         <div
           className="sticky top-0 z-20 border-b"
           style={{ background:'#ffffff', borderColor:'#E2E8F0' }}
@@ -767,24 +838,30 @@ export default function UniversityDetailPage() {
             })}
           </div>
         </div>
+        )}
 
         {/* ── TAB CONTENT ───────────────────────────── */}
         <div
           className="flex-1 px-4 py-5 max-w-2xl w-full mx-auto"
-          onTouchStart={handleTouchStart}
-          onTouchEnd={handleTouchEnd}
+          onTouchStart={isMegaOnly ? undefined : handleTouchStart}
+          onTouchEnd={isMegaOnly ? undefined : handleTouchEnd}
         >
+          {isMegaOnly ? (
+            <MegaUniversityView uni={uni} />
+          ) : (
           <div key={activeTab} className="tab-content">
             {activeTab === 'programs'  && <ProgramsTab programs={programs} campuses={campuses} />}
             {activeTab === 'admission' && <AdmissionTab programs={programs} reminderMap={reminderMap} />}
             {activeTab === 'fees'      && <FeesAndMeritTab programs={programs} studentProfile={studentProfile} />}
             {activeTab === 'hostel'    && <HostelTab campuses={campuses} uniName={uni.short_name || uni.name} />}
           </div>
+          )}
 
-          {/* Swipe hint */}
+          {!isMegaOnly && (
           <p className="text-[11px] text-center mt-6 mb-2" style={{ color:'#CBD5E0' }}>
             ← swipe to change tab →
           </p>
+          )}
         </div>
 
         {/* ── STICKY BOTTOM BAR ─────────────────────── */}
@@ -812,13 +889,14 @@ export default function UniversityDetailPage() {
           {/* Apply Now */}
           {uni.website ? (
             <a
-              href={uni.website}
+              href={getSafeUrl(uni.website)}
               target="_blank"
               rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
               className="flex-1 flex items-center justify-center gap-2 h-12 rounded-xl font-bold text-sm text-white transition-transform hover:scale-[1.02] active:scale-[0.98]"
               style={{ background:'#1E293B' }}
             >
-              Apply Now <ExternalLink size={15} />
+              Visit Official Website <ExternalLink size={15} />
             </a>
           ) : (
             <div

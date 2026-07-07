@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import {
   Bookmark, BookmarkX, Trash2, SlidersHorizontal, Download,
   Share2, CheckSquare, Square, X, ChevronRight, MapPin,
@@ -7,6 +7,7 @@ import {
   Clock, CheckCircle2, Target, AlertCircle, Copy, Check,
 } from 'lucide-react'
 import { loadSaved, removeProgram, matchKey } from '../utils/savedPrograms.js'
+import { getSafeUrl } from '../utils/getSafeUrl.js'
 
 // ─── Inline styles ────────────────────────────────────────
 const STYLE = `
@@ -43,7 +44,7 @@ const COMPARE_ROWS = [
   { key: 'merit',   label: 'Last Cutoff',        render: (m) => m.meritFormula?.approx_recent_closing_merit_pct ? `${m.meritFormula.approx_recent_closing_merit_pct}%` : '—' },
   { key: 'est',     label: 'Your Est. Merit',    render: (m) => m.estimatedMerit != null ? `${m.estimatedMerit.toFixed(1)}%` : '—' },
   { key: 'gap',     label: 'Gap to Cutoff',      render: (m) => m.gap != null ? (m.gap >= 0 ? `+${m.gap.toFixed(1)}%` : `${m.gap.toFixed(1)}%`) : '—' },
-  { key: 'dur',     label: 'Duration',           render: (m) => `${m.program.duration_years} years` },
+  { key: 'dur',     label: 'Duration',           render: (m) => m.program.duration_years ? `${m.program.duration_years} years` : (m.source === 'mega' ? 'Various' : '—') },
   { key: 'status',  label: 'Your Status',        render: (m) => m.classification },
 ]
 
@@ -74,7 +75,7 @@ function buildShareText(savedList) {
       lines.push(`   🎯 Last cutoff: ${m.meritFormula.approx_recent_closing_merit_pct}%${m.estimatedMerit != null ? ` | Your est: ${m.estimatedMerit.toFixed(1)}%` : ''}`)
     }
     lines.push(`   ✅ Status: ${m.classification.toUpperCase()}`)
-    if (m.university.website) lines.push(`   🌐 ${m.university.website}`)
+    if (m.university.website) lines.push(`   🌐 ${getSafeUrl(m.university.website)}`)
     lines.push('')
   })
   lines.push('─────────────────────────')
@@ -101,7 +102,9 @@ function ClassBadge({ cls }) {
 
 // ─── Saved Program Card ───────────────────────────────────
 function SavedCard({ m, checked, onToggle, onRemove, idx }) {
+  const navigate = useNavigate()
   const c = clsOf(m.classification)
+  const isMega = m.source === 'mega'
 
   return (
     <div
@@ -148,7 +151,9 @@ function SavedCard({ m, checked, onToggle, onRemove, idx }) {
             </p>
             <ClassBadge cls={m.classification} />
           </div>
-          <p className="text-xs mt-0.5" style={{ color:'#4A5568' }}>{m.program.program_name}</p>
+          <p className="text-xs mt-0.5" style={{ color:'#4A5568' }}>
+            {isMega ? 'Multiple programs available' : m.program.program_name}
+          </p>
         </div>
       </div>
 
@@ -158,8 +163,14 @@ function SavedCard({ m, checked, onToggle, onRemove, idx }) {
         <span className="flex items-center gap-1"><Building2 size={11} style={{ color:'#1E293B' }} />{m.university.sector}</span>
         <span className="flex items-center gap-1 col-span-2">
           <DollarSign size={11} style={{ color:'#1E293B' }} />
-          <strong style={{ color:'#1A202C' }}>Rs {Number(m.program.semester_fee_pkr_approx ?? 0).toLocaleString('en-PK')}</strong>
-          <span style={{ color:'#718096' }}>/semester</span>
+          {m.program.semester_fee_pkr_approx ? (
+            <>
+              <strong style={{ color:'#1A202C' }}>Rs {Number(m.program.semester_fee_pkr_approx).toLocaleString('en-PK')}</strong>
+              <span style={{ color:'#718096' }}>/semester</span>
+            </>
+          ) : (
+            <span style={{ color:'#A0AEC0' }}>Fee info on website</span>
+          )}
         </span>
         {m.admissionCycle?.entry_test_required && (
           <span className="flex items-center gap-1 col-span-2">
@@ -193,14 +204,20 @@ function SavedCard({ m, checked, onToggle, onRemove, idx }) {
         <span className="text-[11px]" style={{ color:'#A0AEC0' }}>
           Saved {new Date(m.savedAt).toLocaleDateString('en-PK', { day:'numeric', month:'short' })}
         </span>
-        <Link
-          to={`/university/${m.university.university_id}`}
-          state={{ match: m }}
+        <button
+          type="button"
+          onClick={() =>
+            navigate(`/university/${m.university.university_id}`, {
+              state: isMega
+                ? { university: m.university }
+                : { match: m },
+            })
+          }
           className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg"
           style={{ background:'#1E293B', color:'#ffffff' }}
         >
           Details <ChevronRight size={13} />
-        </Link>
+        </button>
       </div>
     </div>
   )

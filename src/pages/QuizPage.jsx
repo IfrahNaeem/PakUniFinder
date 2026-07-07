@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { ALL_CITIES } from '../data/universities.js'
 import {
   ChevronLeft, ChevronRight, Microscope, Cog, Monitor, BarChart2,
   BookOpen, Cpu, Zap, Stethoscope, Briefcase, FlaskConical, Scale,
@@ -70,16 +71,6 @@ const INTERESTS = [
   { id: 'Business',       icon: Briefcase,    label: 'Business & Management',          sub: 'BBA, Economics, Finance' },
   { id: 'Natural Sciences',icon: FlaskConical,label: 'Natural Sciences',               sub: 'Biology, Chemistry, Physics' },
   { id: 'Social Sciences',icon: Scale,        label: 'Law & Social Sciences',          sub: 'LLB, Sociology, Political Science' },
-]
-
-const CITIES = [
-  'Islamabad / Rawalpindi',
-  'Lahore',
-  'Karachi',
-  'Faisalabad',
-  'Multan',
-  'Peshawar',
-  'Quetta',
 ]
 
 const SECTORS = [
@@ -338,11 +329,11 @@ function Step4({ profile, update }) {
       </button>
 
       <div className="flex flex-wrap gap-2 justify-center">
-        {CITIES.map((city) => (
+        {ALL_CITIES.map((city) => (
           <CityChip
             key={city}
             city={city}
-            selected={allCitiesSelected ? CITIES : profile.preferredCities}
+            selected={allCitiesSelected ? ALL_CITIES : profile.preferredCities}
             onToggle={toggleCity}
           />
         ))}
@@ -545,6 +536,7 @@ export default function QuizPage() {
 
   function handleSubmit() {
     setLoading(true)
+    console.log('Selected cities:', profile.preferredCities)
     localStorage.setItem('uniFinderProfile', JSON.stringify(profile))
     setTimeout(() => {
       setLoading(false)

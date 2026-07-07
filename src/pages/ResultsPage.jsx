@@ -5,9 +5,12 @@ import {
   AlertCircle, Home, CalendarDays, ClipboardList, SlidersHorizontal,
   CheckCircle2, Target, TrendingUp, ArrowUpDown, Filter, XCircle, Bookmark,
   RefreshCw,
+  Globe, ExternalLink,
 } from 'lucide-react'
-import { matchUniversities, getSummaryStats } from '../utils/matching.js'
+import { matchUniversities, getSummaryStats, countUniqueUniversities, isAnyCitySelected } from '../utils/matching.js'
+import { getSafeUrl } from '../utils/getSafeUrl.js'
 import { isSaved, toggleSaved, matchKey } from '../utils/savedPrograms.js'
+import UniversityCard from '../components/UniversityCard.jsx'
 import { SkeletonPage } from '../components/Skeleton.jsx'
 
 // ─── Inline styles ────────────────────────────────────────
@@ -135,6 +138,7 @@ function MeritBar({ estimated, cutoff }) {
 // ─── University Card ──────────────────────────────────────
 
 function UniCard({ m, idx }) {
+  const navigate = useNavigate()
   const c = clsOf(m.classification)
   const [bookmarked, setBookmarked] = useState(() => isSaved(m))
 
@@ -219,6 +223,22 @@ function UniCard({ m, idx }) {
               </span>
             )}
           </span>
+          {m.slightlyAboveBudget && (
+            <span
+              className="text-[10px] font-bold px-2 py-0.5 rounded-full ml-1"
+              style={{ background:'#FEF9E7', color:'#B7770D' }}
+            >
+              Slightly Above Budget
+            </span>
+          )}
+          {m.aboveBudget && !m.slightlyAboveBudget && (
+            <span
+              className="text-[10px] font-bold px-2 py-0.5 rounded-full ml-1"
+              style={{ background:'#FDEDEC', color:'#C0392B' }}
+            >
+              Above Budget
+            </span>
+          )}
         </div>
       </div>
 
@@ -292,9 +312,12 @@ function UniCard({ m, idx }) {
 
       {/* ── FOOTER ─────────────────────────────────── */}
       <div className="px-4 py-3 border-t flex items-center justify-between gap-2" style={{ borderColor:'#F1F5F9' }}>
-        <span className="text-[11px]" style={{ color:'#A0AEC0' }}>
-          {m.university.hec_recognized ? '✓ HEC Recognized' : ''}
-        </span>
+        <div className="flex items-center gap-2 min-w-0 flex-wrap">
+          <span className="text-[11px]" style={{ color:'#A0AEC0' }}>
+            {m.university.hec_recognized ? '✓ HEC Recognized' : ''}
+          </span>
+          <UniversityCard university={m.university} />
+        </div>
         <div className="flex items-center gap-2">
           {/* Bookmark button */}
           <button
@@ -313,18 +336,128 @@ function UniCard({ m, idx }) {
               fill={bookmarked ? '#1E293B' : 'none'}
             />
           </button>
-          <Link
-            to={`/university/${m.university.university_id}`}
-            state={{ match: m }}
+          <button
+            type="button"
+            onClick={() =>
+              navigate(`/university/${m.university.university_id}`, { state: { match: m } })
+            }
             className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg transition-transform hover:scale-105 active:scale-95"
             style={{ background:'#1E293B', color:'#ffffff' }}
           >
             View Details <ChevronRight size={13} />
-          </Link>
+          </button>
         </div>
       </div>
     </div>
   )
+}
+
+// ─── Mega university card (no detailed program data) ──────
+
+function MegaCard({ m, idx }) {
+  const navigate = useNavigate()
+  const fields = m.program?.field_categories ?? []
+
+  return (
+    <div
+      className="card-in bg-white rounded-2xl overflow-hidden border"
+      style={{
+        borderColor: '#E2E8F0',
+        borderLeft: '4px solid #475569',
+        animationDelay: `${Math.min(idx * 40, 400)}ms`,
+        boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
+      }}
+    >
+      <div className="flex items-start gap-3 px-4 pt-4 pb-3">
+        <div
+          className="w-11 h-11 rounded-xl flex items-center justify-center font-extrabold text-sm text-white flex-shrink-0"
+          style={{ background: '#475569' }}
+        >
+          {initials(m.university.short_name || m.university.name)}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="font-bold text-sm leading-tight" style={{ color:'#1A202C' }}>
+            {m.university.name}
+          </p>
+          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+            {m.university.short_name && (
+              <span
+                className="text-[11px] font-bold px-1.5 py-0.5 rounded"
+                style={{ background:'#F1F5F9', color:'#475569' }}
+              >
+                {m.university.short_name}
+              </span>
+            )}
+            <ClassBadge cls="Unknown" />
+          </div>
+        </div>
+      </div>
+
+      <div className="px-4 pb-3 grid grid-cols-2 gap-x-4 gap-y-2">
+        <div className="flex items-center gap-1.5 text-xs" style={{ color:'#4A5568' }}>
+          <MapPin size={13} style={{ color:'#1E293B' }} />
+          {m.campus.city}
+        </div>
+        <div className="flex items-center gap-1.5 text-xs" style={{ color:'#4A5568' }}>
+          <Building2 size={13} style={{ color:'#1E293B' }} />
+          {m.university.sector}
+        </div>
+        <div className="flex items-center gap-1.5 text-xs col-span-2" style={{ color:'#4A5568' }}>
+          <Home size={13} style={{ color: m.university.has_hostel ? '#1D4ED8' : '#CBD5E0' }} />
+          {m.university.has_hostel ? 'Hostel available' : 'Hostel not confirmed'}
+        </div>
+      </div>
+
+      {fields.length > 0 && (
+        <div className="px-4 pb-3 flex flex-wrap gap-1.5">
+          {fields.map((f) => (
+            <FieldTag key={f} category={f} />
+          ))}
+        </div>
+      )}
+
+      <div
+        className="px-4 py-3 border-t text-xs leading-relaxed"
+        style={{ background:'#FFFBEB', borderColor:'#FEF3C7', color:'#92400E' }}
+      >
+        Detailed program data coming soon — visit website for admission info.
+      </div>
+
+      <div className="px-4 py-3 border-t flex items-center justify-between gap-2" style={{ borderColor:'#F1F5F9' }}>
+        {m.university.website ? (
+          <a
+            href={getSafeUrl(m.university.website)}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex items-center gap-1 text-xs font-semibold"
+            style={{ color:'#1E293B' }}
+          >
+            <Globe size={13} /> Visit Official Website <ExternalLink size={11} />
+          </a>
+        ) : (
+          <span className="text-xs" style={{ color:'#A0AEC0' }}>Website not listed</span>
+        )}
+        <button
+          type="button"
+          onClick={() =>
+            navigate(`/university/${m.university.university_id}`, {
+              state: { university: m.university },
+            })
+          }
+          className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg"
+          style={{ background:'#1E293B', color:'#ffffff' }}
+        >
+          View Details <ChevronRight size={13} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function MatchCard({ m, idx }) {
+  if (m.source === 'mega') return <MegaCard m={m} idx={idx} />
+  return <UniCard m={m} idx={idx} />
 }
 
 // ─── Empty state ──────────────────────────────────────────
@@ -336,12 +469,20 @@ const BROADEN_TIPS = [
   '🎓 Make sure your FSc group matches the program requirements',
 ]
 
-function EmptyState({ activeFilter, onReset, totalMatches = 0 }) {
-  const isFiltered = activeFilter !== 'all'
+function EmptyState({
+  activeFilter,
+  onReset,
+  totalMatches = 0,
+  isZeroResults = false,
+  isCityEmpty = false,
+  cityNames = [],
+  onSearchAllCities,
+  onChangePreferences,
+}) {
+  const isFiltered = activeFilter !== 'all' && !isZeroResults && !isCityEmpty
 
   return (
     <div className="flex flex-col items-center gap-5 py-12 text-center px-4">
-      {/* Illustration */}
       <div
         className="w-20 h-20 rounded-3xl flex items-center justify-center"
         style={{ background: 'linear-gradient(135deg,#EFF6FF,#D6EAF8)' }}
@@ -352,17 +493,27 @@ function EmptyState({ activeFilter, onReset, totalMatches = 0 }) {
 
       <div>
         <p className="font-extrabold text-lg" style={{ color:'#1A202C' }}>
-          {isFiltered ? `No "${activeFilter}" matches` : 'No exact matches found'}
+          {isCityEmpty
+            ? `No universities found in ${cityNames.join(', ')}`
+            : isZeroResults
+              ? 'No matches found'
+              : isFiltered
+                ? `No "${activeFilter}" matches`
+                : 'No exact matches found'}
         </p>
         <p className="text-sm mt-1.5 max-w-xs mx-auto leading-relaxed" style={{ color:'#4A5568' }}>
-          {isFiltered
-            ? `You have ${totalMatches} total match${totalMatches !== 1 ? 'es' : ''} — switch to "All" to see them.`
-            : "We couldn't find programs matching all your criteria. Try broadening your search:"}
+          {isCityEmpty
+            ? 'Try expanding your search:'
+            : isZeroResults
+              ? 'Try selecting Any City or Both sectors.'
+              : isFiltered
+                ? `You have ${totalMatches} total match${totalMatches !== 1 ? 'es' : ''} — switch to "All" to see them.`
+                : "We couldn't find programs matching all your criteria. Try broadening your search:"}
         </p>
       </div>
 
-      {/* Broaden tips (only for real empty, not filtered) */}
-      {!isFiltered && (
+      {/* Broaden tips (only for real empty, not filtered or city-specific) */}
+      {!isFiltered && !isZeroResults && !isCityEmpty && (
         <ul className="text-left w-full max-w-xs rounded-2xl overflow-hidden border" style={{ borderColor:'#E2E8F0' }}>
           {BROADEN_TIPS.map((tip) => (
             <li
@@ -377,6 +528,26 @@ function EmptyState({ activeFilter, onReset, totalMatches = 0 }) {
       )}
 
       <div className="flex flex-wrap gap-3 justify-center">
+        {isCityEmpty && (
+          <>
+            <button
+              type="button"
+              onClick={onSearchAllCities}
+              className="px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-transform hover:scale-105 active:scale-95"
+              style={{ background:'#1E293B' }}
+            >
+              Search All Cities
+            </button>
+            <button
+              type="button"
+              onClick={onChangePreferences}
+              className="px-5 py-2.5 rounded-xl text-sm font-bold border-2 transition-transform hover:scale-105 active:scale-95"
+              style={{ borderColor:'#1E293B', color:'#1E293B' }}
+            >
+              Change My Preferences
+            </button>
+          </>
+        )}
         {isFiltered && (
           <button
             onClick={onReset}
@@ -387,6 +558,7 @@ function EmptyState({ activeFilter, onReset, totalMatches = 0 }) {
             Show All {totalMatches} Matches
           </button>
         )}
+        {!isCityEmpty && (
         <Link
           to="/quiz"
           className="px-5 py-2.5 rounded-xl text-sm font-bold border-2 transition-transform hover:scale-105 active:scale-95"
@@ -395,6 +567,7 @@ function EmptyState({ activeFilter, onReset, totalMatches = 0 }) {
         >
           ✏️ Adjust Preferences
         </Link>
+        )}
       </div>
     </div>
   )
@@ -453,6 +626,7 @@ export default function ResultsPage() {
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(null)
   const [retryKey, setRetryKey] = useState(0)
+  const [searchAllCities, setSearchAllCities] = useState(false)
 
   useEffect(() => {
     setLoading(true)
@@ -467,12 +641,29 @@ export default function ResultsPage() {
     catch { return {} }
   }, [state])
 
+  const effectiveProfile = useMemo(() => {
+    if (searchAllCities) {
+      return { ...profile, preferredCities: ['Any City'] }
+    }
+    return profile
+  }, [profile, searchAllCities])
+
   const allMatches = useMemo(() => {
-    try { return matchUniversities(profile) }
+    try { return matchUniversities(effectiveProfile) }
     catch (e) { setError(e?.message ?? 'Unknown error'); return [] }
-  }, [profile, retryKey])
+  }, [effectiveProfile, retryKey])
+
+  const isCitySpecificSearch = !isAnyCitySelected(profile.preferredCities)
+  const isCityEmpty =
+    allMatches.length === 0 &&
+    isCitySpecificSearch &&
+    !searchAllCities
+  const selectedCityNames = (profile.preferredCities ?? []).filter(
+    (c) => !c.toLowerCase().includes('any city'),
+  )
 
   const stats = useMemo(() => getSummaryStats(allMatches), [allMatches])
+  const uniCount = useMemo(() => countUniqueUniversities(allMatches), [allMatches])
 
   const displayed = useMemo(() => {
     let list = [...allMatches]
@@ -488,9 +679,13 @@ export default function ResultsPage() {
 
     // Sort
     if (sortBy === 'fee') {
-      list.sort((a, b) => (a.program.semester_fee_pkr_approx ?? 0) - (b.program.semester_fee_pkr_approx ?? 0))
+      list.sort((a, b) => {
+        const fa = a.program?.semester_fee_pkr_approx ?? Infinity
+        const fb = b.program?.semester_fee_pkr_approx ?? Infinity
+        return fa - fb
+      })
     } else if (sortBy === 'city') {
-      list.sort((a, b) => a.campus.city.localeCompare(b.campus.city))
+      list.sort((a, b) => (a.campus?.city ?? '').localeCompare(b.campus?.city ?? ''))
     }
     // 'best' keeps the order from matchUniversities (already sorted)
 
@@ -560,7 +755,10 @@ export default function ResultsPage() {
               <div>
                 <p className="text-xs font-bold uppercase tracking-widest text-blue-200">Your Profile</p>
                 <p className="text-lg font-extrabold text-white mt-0.5">
-                  {allMatches.length} Matched Program{allMatches.length !== 1 ? 's' : ''}
+                  {uniCount} universit{uniCount === 1 ? 'y' : 'ies'} found matching your profile
+                </p>
+                <p className="text-xs text-blue-200 mt-0.5">
+                  {allMatches.length} total result{allMatches.length !== 1 ? 's' : ''}
                 </p>
               </div>
               <button
@@ -699,11 +897,20 @@ export default function ResultsPage() {
               activeFilter={activeFilter}
               onReset={() => setActiveFilter('all')}
               totalMatches={allMatches.length}
+              isZeroResults={allMatches.length === 0 && !isCityEmpty}
+              isCityEmpty={isCityEmpty}
+              cityNames={selectedCityNames}
+              onSearchAllCities={() => setSearchAllCities(true)}
+              onChangePreferences={() => navigate('/quiz')}
             />
           ) : (
             displayed.map((m, idx) => (
-              <UniCard
-                key={`${m.program.program_id}-${m.campus.campus_id}-${idx}`}
+              <MatchCard
+                key={
+                  m.source === 'mega'
+                    ? `mega-${m.university.university_id}-${idx}`
+                    : `${m.program.program_id}-${m.campus.campus_id}-${idx}`
+                }
                 m={m}
                 idx={idx}
               />

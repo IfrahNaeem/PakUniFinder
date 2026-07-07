@@ -1,5 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { CheckCircle2, Banknote, Home, ArrowRight, GraduationCap, Shield } from 'lucide-react'
+import { ALL_UNIVERSITIES, ALL_CAMPUSES, ALL_PROGRAMS } from '../data/universities.js'
+import { useLanguage } from '../context/LanguageContext.jsx'
 
 // ─── Inline keyframes so no external CSS file is needed ───
 const ANIM_STYLE = `
@@ -57,15 +59,6 @@ const FEATURES = [
   },
 ]
 
-// ─── Stats bar data ────────────────────────────────────────
-const STATS = [
-  { value: '15', label: 'Universities' },
-  { value: '20', label: 'Campuses' },
-  { value: '10', label: 'Programs' },
-  { value: '2026', label: 'Updated' },
-]
-
-// ─── Classification badge pill ─────────────────────────────
 const BADGES = [
   { label: 'Safe', bg: '#EFF6FF', color: '#1D4ED8' },
   { label: 'Target', bg: '#FEF9E7', color: '#B7770D' },
@@ -74,6 +67,14 @@ const BADGES = [
 
 export default function HomePage() {
   const navigate = useNavigate()
+  const { t } = useLanguage()
+
+  const stats = [
+    { value: ALL_UNIVERSITIES.length, label: t('home.stat.unis') },
+    { value: ALL_CAMPUSES.length,     label: t('home.stat.campus') },
+    { value: ALL_PROGRAMS.length,     label: t('home.stat.progs') },
+    { value: '2026',                  label: t('home.stat.updated') },
+  ]
 
   return (
     <>
@@ -159,27 +160,33 @@ export default function HomePage() {
         </section>
 
         {/* ── STATS BAR ─────────────────────────────────────── */}
-        <div
-          className="flex flex-wrap items-center justify-center gap-0 border-b"
-          style={{ background: '#ffffff', borderColor: '#E2E8F0' }}
+        <section
+          className="border-b"
+          style={{ background: '#ffffff', borderColor: '#E2E8F0', borderTop: '3px solid #2563EB' }}
+          aria-label="Database statistics"
         >
-          {STATS.map((s, i) => (
-            <div
-              key={s.label}
-              className="flex flex-col items-center justify-center px-6 py-4 flex-1 min-w-[80px]"
-              style={{
-                borderRight: i < STATS.length - 1 ? '1px solid #E2E8F0' : 'none',
-              }}
-            >
-              <span className="text-xl font-extrabold" style={{ color: '#1E293B' }}>
-                {s.value}
-              </span>
-              <span className="text-[11px] font-medium uppercase tracking-wide mt-0.5" style={{ color: '#4A5568' }}>
-                {s.label}
-              </span>
-            </div>
-          ))}
-        </div>
+          <div className="flex flex-wrap items-stretch justify-center max-w-3xl mx-auto">
+            {stats.map((s, i) => (
+              <div
+                key={s.label}
+                className="flex flex-1 flex-col items-center justify-center px-4 py-5 min-w-[88px]"
+                style={{
+                  borderRight: i < stats.length - 1 ? '1px solid #E2E8F0' : 'none',
+                }}
+              >
+                <span className="text-2xl font-extrabold tabular-nums" style={{ color: '#1E293B' }}>
+                  {s.value}
+                </span>
+                <span
+                  className="text-[11px] font-semibold uppercase tracking-wider mt-1 text-center"
+                  style={{ color: '#64748B' }}
+                >
+                  {s.label}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
 
         {/* ── HOW IT WORKS ──────────────────────────────────── */}
         <section className="px-5 py-12 flex flex-col items-center gap-8">

@@ -12,6 +12,7 @@ import {
   NEW_MERIT_FORMULAS,
   NEW_HOSTEL_INFO,
 } from './universities_new_additions.js';
+import { MEGA_UNIVERSITIES, ALL_CITIES } from './universitiesMega.js';
 
 export const UNIVERSITIES = [
   {
@@ -515,9 +516,10 @@ export const HOSTEL_INFO = [
 ];
 
 // ── Merged database (original + new additions) ───────────
-export const ALL_UNIVERSITIES = [...UNIVERSITIES, ...NEW_UNIVERSITIES];
+export const ALL_UNIVERSITIES = [...UNIVERSITIES, ...MEGA_UNIVERSITIES];
 export const ALL_CAMPUSES     = [...CAMPUSES,     ...NEW_CAMPUSES];
 export const ALL_PROGRAMS     = [...PROGRAMS,     ...NEW_PROGRAMS];
 export const ALL_CYCLES       = [...ADMISSION_CYCLES, ...NEW_ADMISSION_CYCLES];
 export const ALL_MERIT        = [...MERIT_FORMULA,    ...NEW_MERIT_FORMULAS];
 export const ALL_HOSTELS      = [...HOSTEL_INFO,      ...NEW_HOSTEL_INFO];
+export { ALL_CITIES };

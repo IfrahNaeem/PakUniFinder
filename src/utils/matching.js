@@ -1,7 +1,7 @@
 /**
  * matching.js — Pakistan University Finder
- * Core matching engine that joins all data tables and ranks
- * programs for a given student profile.
+ * Relaxed matching: soft fee filter, flexible group rules,
+ * strict city filter, mega-university fallback when detailed data is sparse.
  */
 
 import {
@@ -11,297 +11,302 @@ import {
   ALL_CYCLES,
   ALL_MERIT,
   ALL_HOSTELS,
-} from '../data/universities.js';
+} from '../data/universities.js'
+import { MEGA_UNIVERSITIES } from '../data/universitiesMega.js'
 
-// ─────────────────────────────────────────────────────────
-// Internal helpers
-// ─────────────────────────────────────────────────────────
+const MERIT_ORDER = { Safe: 0, Target: 1, Reach: 2, Unknown: 3, 'Check Website': 3 }
 
-/**
- * University sector order used when sorting inside same classification bucket.
- * Lower index = higher preference (Government first, then semi-gov, then private).
- */
-const SECTOR_ORDER = ['Government', 'Government-Autonomous', 'Semi-Government', 'Private'];
-
-/**
- * Does the student's FSc group satisfy the program's requirement?
- *
- * Program values seen in data:
- *   "Pre-Engineering / ICS"
- *   "Pre-Medical"
- *   "Any"
- *   "Any / Pre-Engineering preferred"
- *
- * Student fscGroup values expected:
- *   "Pre-Engineering" | "ICS" | "Pre-Medical" | "Arts" | "Commerce" | "Other"
- */
-function fscGroupMatches(requiredGroup, studentGroup) {
-  if (!requiredGroup || requiredGroup.trim() === '') return true;
-
-  const req = requiredGroup.toLowerCase();
-
-  // "Any" prefixed requirements → open to all
-  if (req.startsWith('any')) return true;
-
-  const student = studentGroup.toLowerCase().trim();
-
-  // Split on "/" and check if student group appears in any token
-  return req.split('/').some((token) => token.trim().includes(student));
-}
-
-/**
- * Does the campus city satisfy the student's city preference list?
- * Returns true when preferredCities is empty, contains "Any City", or contains the campus city.
- */
-function cityMatches(campusCity, preferredCities = []) {
-  if (!preferredCities.length) return true;
-  if (preferredCities.some((c) => c.toLowerCase() === 'any city' || c === 'Any')) return true;
+// ─── Strict city filter ─────────────────────────────────────
+export function isAnyCitySelected(preferredCities = []) {
+  if (!preferredCities || preferredCities.length === 0) return true
   return preferredCities.some(
-    (c) => c.toLowerCase().trim() === campusCity.toLowerCase().trim(),
-  );
+    (c) =>
+      c === 'Any City' ||
+      c === 'Any City in Pakistan' ||
+      c.toLowerCase().includes('any city'),
+  )
 }
 
-/**
- * Does the university sector match the student's sector preference?
- * "Both" → accept everything.
- * "Government" → accept Government + Semi-Government + Government-Autonomous.
- * "Private" → accept Private only.
- */
+function strictCityMatch(entityCity, preferredCities = []) {
+  if (!entityCity) return false
+  return preferredCities.some(
+    (selectedCity) =>
+      entityCity.toLowerCase().trim() === selectedCity.toLowerCase().trim(),
+  )
+}
+
+// ─── Flexible FSc group matching ────────────────────────────
+function groupMatches(programGroup, studentGroup) {
+  if (!programGroup || programGroup === 'Any') return true
+  const pg = programGroup.toLowerCase()
+  const sg = (studentGroup ?? '').toLowerCase()
+  if (!sg) return true
+  if (pg.includes('any')) return true
+  if (pg.includes(sg)) return true
+  if (sg === 'ics' && pg.includes('ics')) return true
+  if (sg === 'pre-engineering' && pg.includes('engineering')) return true
+  if (sg === 'pre-medical' && pg.includes('medical')) return true
+  if (sg === 'commerce' && (pg.includes('commerce') || pg.includes('business'))) return true
+  if (sg === 'arts' && (pg.includes('arts') || pg.includes('humanities'))) return true
+  return false
+}
+
 function sectorMatches(uniSector, preferredSector) {
-  if (!preferredSector || preferredSector === 'Both') return true;
-  if (preferredSector === 'Government') {
-    return ['Government', 'Semi-Government', 'Government-Autonomous'].includes(uniSector);
-  }
-  return uniSector === preferredSector;
+  if (!preferredSector || preferredSector === 'Both') return true
+  return uniSector.toLowerCase().includes(preferredSector.toLowerCase())
 }
 
-/**
- * Estimate the student's merit percentage using the program's weighted formula.
- *
- * Since we don't have an actual entry-test score at quiz time, we proxy the
- * entry-test performance as the average of matric and FSc (a reasonable
- * heuristic — academic achievers tend to score proportionally on entry tests).
- * This estimate will be replaced by the real score once the student sits the test.
- *
- * Returns null when the formula has null weights (e.g. PU — formula unknown).
- */
-function estimateMerit(formula, { matricPercent, fscPercent }) {
-  const { matric_weight_pct, fsc_weight_pct, entry_test_weight_pct } = formula;
-
-  if (matric_weight_pct == null || fsc_weight_pct == null || entry_test_weight_pct == null) {
-    return null;
-  }
-
-  // Proxy entry-test score: weighted average of academic scores, capped at 100
-  const entryTestEstimate = Math.min(100, (matricPercent * 0.4 + fscPercent * 0.6));
-
-  const merit =
-    (matricPercent * matric_weight_pct) / 100 +
-    (fscPercent * fsc_weight_pct) / 100 +
-    (entryTestEstimate * entry_test_weight_pct) / 100;
-
-  return Math.round(merit * 100) / 100; // 2 dp
+// ─── Soft fee filter ─────────────────────────────────────
+function feeAllowed(fee, maxSemesterFee) {
+  if (!maxSemesterFee || maxSemesterFee <= 0) return true
+  if (!fee) return true
+  return fee <= maxSemesterFee * 2
 }
 
-/**
- * Classify a match as "Safe", "Target", or "Reach" based on the gap
- * between estimated merit and the program's closing merit cutoff.
- *
- * Safe   → estimated merit is ≥ cutoff + 5 pp
- * Target → estimated merit is ≥ cutoff and < cutoff + 5 pp
- * Reach  → estimated merit is ≥ cutoff − 10 pp and < cutoff
- * None   → too far below cutoff (excluded from results)
- *
- * Returns { classification, gap } where gap = estimatedMerit − cutoff (can be negative).
- * Returns null when classification is not possible (no cutoff or no estimated merit).
- */
-function classifyMatch(estimatedMerit, formula) {
-  const cutoff = formula.approx_recent_closing_merit_pct;
-
-  if (estimatedMerit == null || cutoff == null) {
-    // Cannot classify — still include but mark as "Unknown"
-    return { classification: 'Unknown', gap: null };
+function feeFlags(fee, maxSemesterFee) {
+  if (!maxSemesterFee || !fee) {
+    return { aboveBudget: false, slightlyAboveBudget: false }
   }
-
-  const gap = Math.round((estimatedMerit - cutoff) * 100) / 100;
-
-  if (gap >= 5) return { classification: 'Safe', gap };
-  if (gap >= 0) return { classification: 'Target', gap };
-  if (gap >= -10) return { classification: 'Reach', gap };
-
-  return null; // Too far below — exclude entirely
+  if (fee <= maxSemesterFee) {
+    return { aboveBudget: false, slightlyAboveBudget: false }
+  }
+  return {
+    aboveBudget: true,
+    slightlyAboveBudget: fee <= maxSemesterFee * 1.3,
+  }
 }
 
-/**
- * Numeric sort weight per classification bucket (lower = earlier in results).
- */
-const CLASSIFICATION_RANK = { Safe: 0, Target: 1, Reach: 2, Unknown: 3 };
+// ─── Merit calculation & classification ─────────────────────
+function calculateMerit(matric, fsc, formula) {
+  const estimatedTestScore = 70
+  return (
+    (matric * (formula.matric_weight_pct || 10)) / 100 +
+    (fsc * (formula.fsc_weight_pct || 40)) / 100 +
+    (estimatedTestScore * (formula.entry_test_weight_pct || 50)) / 100
+  )
+}
 
-// ─────────────────────────────────────────────────────────
-// Public API
-// ─────────────────────────────────────────────────────────
+function classifyMerit(estimatedMerit, cutoff) {
+  if (cutoff == null || estimatedMerit == null) return 'Check Website'
+  const diff = estimatedMerit - cutoff
+  if (diff >= 5) return 'Safe'
+  if (diff >= 0) return 'Target'
+  if (diff >= -10) return 'Reach'
+  return 'Reach'
+}
 
-/**
- * matchUniversities(studentProfile)
- *
- * @param {Object} studentProfile
- * @param {number} studentProfile.matricPercent       — Matric percentage (0–100)
- * @param {number} studentProfile.fscPercent          — FSc / Intermediate percentage (0–100)
- * @param {string} studentProfile.fscGroup            — e.g. "Pre-Engineering" | "ICS" | "Pre-Medical" | "Arts" | "Commerce"
- * @param {string} studentProfile.interestArea        — e.g. "CS-IT" | "Engineering" | "Medical" | "Business" | "Social Sciences"
- * @param {string[]} studentProfile.preferredCities   — e.g. ["Lahore", "Islamabad"] or ["Any City"]
- * @param {string} studentProfile.sector              — "Government" | "Private" | "Both"
- * @param {number} studentProfile.maxSemesterFee      — Maximum affordable semester fee in PKR (0 = no limit)
- *
- * @returns {Array<Object>} Sorted array of enriched match objects, each containing:
- *   {
- *     program, campus, university,
- *     admissionCycle,   // may be null if no cycle found
- *     meritFormula,     // may be null if no formula found
- *     hostelInfo,       // may be null if no hostel data for this campus
- *     estimatedMerit,   // number | null
- *     classification,   // "Safe" | "Target" | "Reach" | "Unknown"
- *     gap,              // number | null  (estimatedMerit − cutoff)
- *   }
- */
+function toClassification(meritStatus) {
+  return meritStatus === 'Check Website' ? 'Unknown' : meritStatus
+}
+
+function getInterests(profile) {
+  if (profile.interests?.length) return profile.interests
+  if (profile.interestArea) return [profile.interestArea]
+  return []
+}
+
+function interestMatchesMega(interests, fieldCategories = []) {
+  if (!interests.length) return true
+  return fieldCategories.some((f) =>
+    interests.some(
+      (i) =>
+        f.toLowerCase().includes(i.toLowerCase()) ||
+        i.toLowerCase().includes(f.toLowerCase()),
+    ),
+  )
+}
+
+// ─── Mega-university fallback ───────────────────────────────
+function matchFromMegaList(studentProfile) {
+  const { preferredCities = [], sector = 'Both' } = studentProfile
+  const interests = getInterests(studentProfile)
+  const anyCity = isAnyCitySelected(preferredCities)
+
+  return MEGA_UNIVERSITIES.filter((uni) => {
+    if (!anyCity) {
+      const cityMatch = strictCityMatch(uni.city, preferredCities)
+      if (!cityMatch) return false
+    }
+
+    const sectorOk =
+      sector === 'Both' ||
+      uni.sector.toLowerCase().includes(sector.toLowerCase())
+
+    const fieldOk = interestMatchesMega(interests, uni.field_categories)
+
+    return sectorOk && fieldOk
+  }).map((uni) => ({
+    source: 'mega',
+    matchType: 'university',
+    university: {
+      university_id: uni.university_id,
+      name: uni.name,
+      short_name: uni.short_name,
+      sector: uni.sector,
+      city: uni.city,
+      province: uni.province,
+      website: uni.website,
+      has_hostel: uni.has_hostel,
+      hec_recognized: true,
+    },
+    campus: {
+      campus_id: `${uni.university_id}-main`,
+      university_id: uni.university_id,
+      city: uni.city,
+      province: uni.province,
+    },
+    program: {
+      program_id: `${uni.university_id}-overview`,
+      program_name: 'Multiple programs available',
+      field_category: uni.field_categories?.[0] ?? 'General',
+      field_categories: uni.field_categories ?? [],
+      semester_fee_pkr_approx: null,
+      degree_level: 'Various',
+      duration_years: null,
+    },
+    admissionCycle: null,
+    meritFormula: null,
+    hostelInfo: uni.has_hostel
+      ? { available_for: 'Both', monthly_cost_pkr_approx: null, mess_included: null }
+      : null,
+    estimatedMerit: null,
+    meritStatus: 'Check Website',
+    classification: 'Unknown',
+    aboveBudget: false,
+    slightlyAboveBudget: false,
+    gap: null,
+  }))
+}
+
+function buildDetailedMatch(program, profile) {
+  const campus = ALL_CAMPUSES.find((c) => c.campus_id === program.campus_id)
+  const university = ALL_UNIVERSITIES.find(
+    (u) => u.university_id === campus?.university_id,
+  )
+  const formula = ALL_MERIT.find((m) => m.program_id === program.program_id)
+  const cycle = ALL_CYCLES.find((c) => c.program_id === program.program_id)
+  const hostel = ALL_HOSTELS.find((h) => h.campus_id === campus?.campus_id)
+
+  const estimatedMerit = formula
+    ? Math.round(calculateMerit(profile.matricPercent, profile.fscPercent, formula) * 100) / 100
+    : null
+
+  const meritStatus = formula
+    ? classifyMerit(estimatedMerit, formula.approx_recent_closing_merit_pct)
+    : 'Check Website'
+
+  const cutoff = formula?.approx_recent_closing_merit_pct
+  const gap =
+    estimatedMerit != null && cutoff != null
+      ? Math.round((estimatedMerit - cutoff) * 100) / 100
+      : null
+
+  const { aboveBudget, slightlyAboveBudget } = feeFlags(
+    program.semester_fee_pkr_approx,
+    profile.maxSemesterFee,
+  )
+
+  return {
+    source: 'detailed',
+    program,
+    campus,
+    university,
+    admissionCycle: cycle ?? null,
+    meritFormula: formula ?? null,
+    hostelInfo: hostel ?? null,
+    estimatedMerit,
+    meritStatus,
+    classification: toClassification(meritStatus),
+    aboveBudget,
+    slightlyAboveBudget,
+    gap,
+  }
+}
+
+// ─── Public API ───────────────────────────────────────────
 export function matchUniversities(studentProfile) {
   const {
     matricPercent = 0,
     fscPercent = 0,
     fscGroup = '',
-    interestArea = '',
     preferredCities = [],
     sector = 'Both',
     maxSemesterFee = 0,
-  } = studentProfile;
+  } = studentProfile
 
-  // ── Step 1: Filter programs by FSc group ────────────────
-  const eligiblePrograms = ALL_PROGRAMS.filter((prog) =>
-    fscGroupMatches(prog.required_fsc_group, fscGroup),
-  );
+  const anyCity = isAnyCitySelected(preferredCities)
 
-  // ── Step 2: Join campus and filter by city ───────────────
-  const withCampus = eligiblePrograms.flatMap((prog) => {
-    const campus = ALL_CAMPUSES.find((c) => c.campus_id === prog.campus_id);
-    if (!campus) return [];
-    if (campus.is_test_center_only) return [];
-    if (!cityMatches(campus.city, preferredCities)) return [];
-    return [{ prog, campus }];
-  });
+  // Step 1: match from detailed PROGRAMS database
+  const programMatches = ALL_PROGRAMS.filter((program) => {
+    const campus = ALL_CAMPUSES.find((c) => c.campus_id === program.campus_id)
+    const university = ALL_UNIVERSITIES.find(
+      (u) => u.university_id === campus?.university_id,
+    )
+    if (!campus || !university) return false
+    if (campus.is_test_center_only) return false
 
-  // ── Step 3: Join university and filter by sector ─────────
-  const withUniversity = withCampus.flatMap(({ prog, campus }) => {
-    const university = ALL_UNIVERSITIES.find((u) => u.university_id === campus.university_id);
-    if (!university) return [];
-    if (!sectorMatches(university.sector, sector)) return [];
-    return [{ prog, campus, university }];
-  });
+    if (!groupMatches(program.required_fsc_group, fscGroup)) return false
 
-  // ── Step 4: Filter by semester fee budget ───────────────
-  const withinBudget = withUniversity.filter(({ prog }) => {
-    if (!maxSemesterFee || maxSemesterFee <= 0) return true;
-    return prog.semester_fee_pkr_approx <= maxSemesterFee;
-  });
+    if (!anyCity) {
+      const cityMatch = strictCityMatch(campus.city, preferredCities)
+      if (!cityMatch) return false
+    }
 
-  // ── Step 5: Filter by minimum FSc requirement ───────────
-  const meetsMinGrade = withinBudget.filter(({ prog }) => {
-    const formula = ALL_MERIT.find((f) => f.program_id === prog.program_id);
-    if (!formula) return true; // no formula on record — don't exclude
-    if (!formula.min_fsc_percentage_required) return true;
-    return fscPercent >= formula.min_fsc_percentage_required;
-  });
+    if (!sectorMatches(university.sector, sector)) return false
 
-  // ── Step 6 & 7: Calculate merit + classify ─────────────
-  const classified = meetsMinGrade.flatMap(({ prog, campus, university }) => {
-    const meritFormula = ALL_MERIT.find((f) => f.program_id === prog.program_id) ?? null;
-    const admissionCycle =
-      ALL_CYCLES.find((c) => c.program_id === prog.program_id) ?? null;
-    const hostelInfo =
-      ALL_HOSTELS.find((h) => h.campus_id === campus.campus_id) ?? null;
+    if (!feeAllowed(program.semester_fee_pkr_approx, maxSemesterFee)) return false
 
-    const estimatedMerit = meritFormula
-      ? estimateMerit(meritFormula, { matricPercent, fscPercent })
-      : null;
+    const formula = ALL_MERIT.find((m) => m.program_id === program.program_id)
+    if (
+      formula?.min_fsc_percentage_required &&
+      fscPercent < formula.min_fsc_percentage_required
+    ) {
+      return false
+    }
 
-    const classResult = meritFormula
-      ? classifyMatch(estimatedMerit, meritFormula)
-      : { classification: 'Unknown', gap: null };
+    return true
+  }).map((program) => buildDetailedMatch(program, studentProfile))
 
-    // Exclude matches that fall more than 10 pp below the cutoff
-    if (classResult === null) return [];
+  // Step 2: fill from MEGA when detailed matches are sparse
+  let megaMatches = []
+  if (programMatches.length < 5) {
+    const seenIds = new Set(programMatches.map((p) => p.university.university_id))
+    megaMatches = matchFromMegaList(studentProfile).filter(
+      (m) => !seenIds.has(m.university.university_id),
+    )
+  }
 
-    // Optional: boost programs matching interestArea
-    const interestBoost =
-      interestArea &&
-      prog.field_category.toLowerCase().includes(interestArea.toLowerCase())
-        ? 1
-        : 0;
+  // Step 3: combine and sort
+  const allMatches = [...programMatches, ...megaMatches]
 
-    return [
-      {
-        program: prog,
-        campus,
-        university,
-        admissionCycle,
-        meritFormula,
-        hostelInfo,
-        estimatedMerit,
-        classification: classResult.classification,
-        gap: classResult.gap,
-        _interestBoost: interestBoost,
-      },
-    ];
-  });
+  allMatches.sort((a, b) => {
+    const orderDiff =
+      (MERIT_ORDER[a.meritStatus] ?? 3) - (MERIT_ORDER[b.meritStatus] ?? 3)
+    if (orderDiff !== 0) return orderDiff
+    if (a.source === 'detailed' && b.source === 'mega') return -1
+    if (a.source === 'mega' && b.source === 'detailed') return 1
+    return (b.gap ?? -999) - (a.gap ?? -999)
+  })
 
-  // ── Step 8: Sort ─────────────────────────────────────────
-  // Primary:   classification rank (Safe → Target → Reach → Unknown)
-  // Secondary: interest area match (boosted programs first)
-  // Tertiary:  gap descending (larger positive gap = safer / better match)
-  // Quaternary: sector order (Government before Private)
-  classified.sort((a, b) => {
-    const classRankDiff =
-      CLASSIFICATION_RANK[a.classification] - CLASSIFICATION_RANK[b.classification];
-    if (classRankDiff !== 0) return classRankDiff;
-
-    if (b._interestBoost !== a._interestBoost) return b._interestBoost - a._interestBoost;
-
-    const aGap = a.gap ?? -999;
-    const bGap = b.gap ?? -999;
-    if (bGap !== aGap) return bGap - aGap;
-
-    return (
-      SECTOR_ORDER.indexOf(a.university.sector) -
-      SECTOR_ORDER.indexOf(b.university.sector)
-    );
-  });
-
-  // Strip internal sort keys before returning
-  return classified.map(({ _interestBoost, ...rest }) => rest);
+  return allMatches
 }
 
-/**
- * getTopMatches(studentProfile, limit = 10)
- * Convenience wrapper that returns only the top N results.
- */
 export function getTopMatches(studentProfile, limit = 10) {
-  return matchUniversities(studentProfile).slice(0, limit);
+  return matchUniversities(studentProfile).slice(0, limit)
 }
 
-/**
- * getSummaryStats(matches)
- * Returns a quick breakdown useful for displaying result page stats.
- *
- * @param {Array} matches — result array from matchUniversities()
- * @returns {{ total, safe, target, reach, unknown }}
- */
 export function getSummaryStats(matches) {
   return matches.reduce(
     (acc, m) => {
-      acc.total++;
-      const key = m.classification.toLowerCase();
-      if (key in acc) acc[key]++;
-      return acc;
+      acc.total++
+      const key = (m.classification ?? 'Unknown').toLowerCase()
+      if (key in acc) acc[key]++
+      return acc
     },
     { total: 0, safe: 0, target: 0, reach: 0, unknown: 0 },
-  );
+  )
+}
+
+export function countUniqueUniversities(matches) {
+  return new Set(matches.map((m) => m.university?.university_id).filter(Boolean)).size
 }
